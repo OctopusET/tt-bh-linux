@@ -9,9 +9,14 @@ try:
     # Luwen pre-v4.2.0
     from tt_smi.tt_smi_backend import pci_board_reset
 except ImportError:
-    # v4.2.0 onwards
-    from tt_smi.tt_smi_reset import pci_board_reset
-    from tt_smi.tt_smi_reset import pci_board_reset, parse_reset_input
+    try:
+        # v4.2.0 onwards
+        from tt_smi.tt_smi_reset import pci_board_reset, parse_reset_input
+    except ImportError:
+        # v5.2.0 onwards
+        from tt_smi.reset import pci_board_reset
+        from tt_smi.device_input import parse_smi_device_input as parse_reset_input
+
 import clock
 import time
 import libfdt
