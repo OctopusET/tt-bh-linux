@@ -84,6 +84,17 @@ def reset_x280(chip, l2cpu_indices):
     chip.axi_read32(reset_unit_base + 0x14) # L2CPU_RESET
     clock.set_l2cpu_pll(chip, 1750)
 
+def find_memory_node(fdt):
+    # The memory node's unit-address varies per L2CPU (e.g. L2CPU3 is relocated to
+    # the upper half of the shared DRAM tile), so locate it by name prefix rather
+    # than a hardcoded path.
+    offset = fdt.first_subnode(0, libfdt.QUIET_NOTFOUND)
+    while offset >= 0:
+        if fdt.get_name(offset).startswith("memory@"):
+            return offset
+        offset = fdt.next_subnode(offset, libfdt.QUIET_NOTFOUND)
+    return -1
+
 def read_bin_file(file_path):
     with open(file_path, 'rb') as file:
         file_bytes = file.read()
@@ -154,7 +165,7 @@ def main():
             bootargs += f" {args.extra_bootargs}"
         fdt.setprop(chosen_offset, "bootargs", bytes(bootargs, encoding="utf-8") + b'\0')
 
-        memory_node = fdt.path_offset("/memory@400030000000", libfdt.QUIET_NOTFOUND)
+        memory_node = find_memory_node(fdt)
         if memory_node < 0:
             print("memory node not found in DT. Exiting")
             exit(1)
@@ -171,7 +182,7 @@ def main():
                 fdt.setprop_u32(reserved_memory_offset, "#size-cells", 2)
                 fdt.setprop(reserved_memory_offset, "ranges", b'')
 
-            virtio_reserved_offset = fdt.add_subnode(reserved_memory_offset, "memory@4000afa00000")
+            virtio_reserved_offset = fdt.add_subnode(reserved_memory_offset, f"memory@{mem_end - 0x600000:x}")
             reserved_reg = struct.pack('>QQ', mem_end - 0x600000, 0x600000)
             fdt.setprop(virtio_reserved_offset, "reg", reserved_reg)
             fdt.setprop(virtio_reserved_offset, "no-map", b'')
