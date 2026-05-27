@@ -47,6 +47,9 @@ endif
 L2CPU ?= 0
 TTDEVICE ?= 0
 
+# tmux session name used by connect_all
+SESSION ?= connect_all
+
 # Use bash as the shell
 SHELL := /bin/bash
 
@@ -81,8 +84,10 @@ help:
 	@echo ""
 	@echo "Available recipes:"
 	@echo "    boot                   # Boot the Blackhole RISC-V CPU"
+	@echo "    boot_all               # Boot all 4 L2CPUs at once, console each in a tmux grid"
 	@echo "    connect                # Connect to console (requires a booted RISC-V)"
-	@echo "    ssh                    # SSH to machine (requires a booted RISC-V)"
+	@echo "    connect_all            # Connect to all 4 booted L2CPUs in a tmux grid"
+	@echo "    ssh                    # SSH to machine (requires a booted RISC-V; set L2CPU=n)"
 	@echo "    build_linux            # Build the kernel"
 	@echo "    build_opensbi          # Build opensbi"
 	@echo "    build_hosttool         # Build tt-bh-linux"
@@ -119,8 +124,24 @@ boot_initramfs: _need_linux _need_opensbi _need_dtb _need_rootfs _need_hosttool 
 	$(PYTHON) boot.py --boot --ttdevice $(TTDEVICE) --l2cpu $(L2CPU) --opensbi_bin $(OPENSBI) --opensbi_dst 0x400030000000 --rootfs_dst 0x4000e5000000 --kernel_bin $(KERNEL) --kernel_dst 0x400030200000 --dtb_bin $(DTB) --dtb_dst 0x400030100000 --boot_device initramfs --rootfs_bin $(INITRAMFS) $(DT_NO_VIRTIO_DEVICES) $(EXTRA_BOOTARGS)
 	./console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu $(L2CPU) --disk $(DISK_IMAGE)
 
-# boot_all: _need_linux _need_opensbi _need_dtb _need_dtb_all _need_rootfs _need_hosttool _need_python _need_luwen _need_ttkmd _need_pylibfdt
-# 	$(PYTHON) boot.py --boot --ttdevice $(TTDEVICE) --l2cpu 0 1 2 3 --opensbi_bin fw_jump.bin --opensbi_dst 0x400100000000 0x400100000000 0x400100000000 0x400180000000 --rootfs_dst 0x400165000000 0x400165000000 0x400165000000 0x4001e5000000 --kernel_bin Image --kernel_dst 0x400100200000 0x400100200000 0x400100200000 0x400180200000 --dtb_bin blackhole-card.dtb blackhole-card.dtb blackhole-card2.dtb blackhole-card3.dtb --dtb_dst 0x400100100000 0x400100100000 0x400100100000 0x400180100000 --boot_device initramfs --rootfs_bin $(INITRAMFS)
+# Boot all 4 L2CPUs (16 RISC-V cores) at once, each into its own rootfs, then
+# open a console for each. L2CPU0/1 own a 4GB DRAM tile; L2CPU2 and L2CPU3 share
+# one tile, so each is given a non-overlapping 2GB half (--mem_start/--mem_size).
+# The same blackhole-card.dtb is used for all four; boot.py patches its memory
+# region per L2CPU at runtime.
+boot_all: _need_linux _need_opensbi _need_dtb _need_rootfs _need_hosttool _need_python _need_luwen _need_ttkmd _need_pylibfdt
+	# Give each L2CPU its own writable rootfs (keep existing ones to preserve state)
+	@for i in 0 1 2 3; do \
+		[ -e rootfs.l2cpu-$$i.ext4 ] || cp -f $(DISK_IMAGE) rootfs.l2cpu-$$i.ext4; \
+	done
+	$(PYTHON) boot.py --boot --ttdevice $(TTDEVICE) --l2cpu 0 1 2 3 \
+		--opensbi_bin $(OPENSBI) --opensbi_dst 0x400030000000 0x400030000000 0x400030000000 0x4000b0000000 \
+		--kernel_bin $(KERNEL)   --kernel_dst  0x400030200000 0x400030200000 0x400030200000 0x4000b0200000 \
+		--dtb_bin $(DTB) $(DTB) $(DTB) $(DTB)  --dtb_dst     0x400030100000 0x400030100000 0x400030100000 0x4000b0100000 \
+		--rootfs_dst 0x4000e5000000 0x4000e5000000 0x400065000000 0x4000e5000000 \
+		--mem_start  0x400030000000 0x400030000000 0x400030000000 0x4000b0000000 \
+		--mem_size   0x100000000    0x100000000    0x80000000     0x80000000
+	$(MAKE) connect_all
 
 # Connect to console (requires a booted RISC-V)
 connect: _need_hosttool _need_ttkmd
@@ -131,26 +152,26 @@ connect: _need_hosttool _need_ttkmd
 ssh:
 	ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o NoHostAuthenticationForLocalhost=yes -o User=debian -p$$((2222 + 4 * $(TTDEVICE) + $(L2CPU))) localhost
 
-# SESSION = connect_all
-# # Launch tmux with a 2x2 grid and connect to each l2cpu in each
-# connect_all: _need_tmux
-# 	# Kill any existing sessions named connect_all
-# 	tmux has-session -t "$(SESSION)" 2>/dev/null && tmux kill-session -t "$(SESSION)" || true
+# Connect to all 4 booted L2CPUs in a tmux 2x2 grid (one console per L2CPU).
+# Run after boot_all (which invokes this itself).
+connect_all: _need_hosttool _need_ttkmd _need_tmux
+	# Kill any existing session of the same name
+	tmux has-session -t "$(SESSION)" 2>/dev/null && tmux kill-session -t "$(SESSION)" || true
 
-# 	tmux new-session  -d -s "$(SESSION)" './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 0' 	# pane 0
-# 	tmux split-window -h -t "$(SESSION)":0 './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 1' 	# pane 1 (right)
-# 	tmux select-pane   -t "$(SESSION)":0.0 									# back to pane 0
-# 	tmux split-window -v -t "$(SESSION)":0 './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 2' 	# pane 2 (bottom-left)
-# 	tmux select-pane   -t "$(SESSION)":0.1 									# go to pane 1
-# 	tmux split-window -v -t "$(SESSION)":0 './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 3' 	# pane 3 (bottom-right)
-# 	tmux select-layout -t "$(SESSION)":0 tiled 								# ensure 2x2 grid
+	tmux new-session  -d -s "$(SESSION)" './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 0 --disk rootfs.l2cpu-0.ext4' 	# pane 0
+	tmux split-window -h -t "$(SESSION)":0 './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 1 --disk rootfs.l2cpu-1.ext4' 	# pane 1 (right)
+	tmux select-pane   -t "$(SESSION)":0.0 									# back to pane 0
+	tmux split-window -v -t "$(SESSION)":0 './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 2 --disk rootfs.l2cpu-2.ext4' 	# pane 2 (bottom-left)
+	tmux select-pane   -t "$(SESSION)":0.1 									# go to pane 1
+	tmux split-window -v -t "$(SESSION)":0 './console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu 3 --disk rootfs.l2cpu-3.ext4' 	# pane 3 (bottom-right)
+	tmux select-layout -t "$(SESSION)":0 tiled 								# ensure 2x2 grid
 
-# 	# If we're already inside a tmux session, we need to use switch-client
-# 	if [ -n "$$TMUX" ]; then \
-#         tmux switch-client -t "$(SESSION)"; \
-#     else \
-#         tmux attach-session -t "$(SESSION)"; \
-#     fi
+	# If we're already inside a tmux session, we need to use switch-client
+	if [ -n "$$TMUX" ]; then \
+        tmux switch-client -t "$(SESSION)"; \
+    else \
+        tmux attach-session -t "$(SESSION)"; \
+    fi
 
 user-data.img: user-data.yaml _need_cloud_image_utils
 	cloud-localds -d raw user-data.img  user-data.yaml
@@ -474,8 +495,10 @@ endef
 
 .PHONY: apt_update \
 	boot \
+	boot_all \
 	boot_cloud_init \
 	boot_initramfs \
+	connect_all \
 	build_all \
 	build_dtb_all \
 	build_hosttool \
