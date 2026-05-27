@@ -64,9 +64,16 @@ def parse_args():
     parser.add_argument("--dtb_bin", type=str, nargs="+", required=False, help="list of path to dtb bin file for each l2cpu")
     parser.add_argument("--dtb_dst", type=str, nargs="+", required=False, help="list of Destination address for dtb for each l2cpu")
 
+    # Optionally override the memory@ node's base/size per L2CPU. Needed when L2CPUs
+    # share a DRAM tile (L2CPU2 and L2CPU3) and must be given non-overlapping regions.
+    parser.add_argument("--mem_start", type=str, nargs="+", required=False, help="list of memory base address for each l2cpu")
+    parser.add_argument("--mem_size", type=str, nargs="+", required=False, help="list of memory size for each l2cpu")
+
     args = parser.parse_args()
 
     assert len(args.l2cpu) == len(args.rootfs_dst) == len(args.opensbi_dst) == len(args.kernel_dst) == len(args.dtb_bin) == len(args.dtb_dst), "Length of all vars must be same"
+    if args.mem_start or args.mem_size:
+        assert args.mem_start and args.mem_size and len(args.mem_start) == len(args.mem_size) == len(args.l2cpu), "--mem_start and --mem_size must be passed together, one value per l2cpu"
     for l2cpu in args.l2cpu:
         assert 0 <= l2cpu < 4, "l2cpu IDs must be in [0, 1, 2, 3]"
 
@@ -169,6 +176,13 @@ def main():
         if memory_node < 0:
             print("memory node not found in DT. Exiting")
             exit(1)
+
+        # Resize/relocate this L2CPU's memory region if requested. L2CPU2 and L2CPU3
+        # share a 4GB DRAM tile, so each is given a non-overlapping 2GB half.
+        if args.mem_start and args.mem_size:
+            mem_start = int(args.mem_start[idx], 16)
+            mem_size = int(args.mem_size[idx], 16)
+            fdt.setprop(memory_node, "reg", struct.pack('>QQ', mem_start, mem_size))
 
         if not args.dt_no_virtio_devices:
             mem = fdt.getprop(memory_node, "reg")
