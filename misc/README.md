@@ -1,17 +1,22 @@
 ## Booting All 4 L2CPUs
-Each of the 4 L2CPUs require a different device tree
-1. L2CPU0 and 1 have a dedicated 4G DRAM tile each, so can use full 4G memory
-1. L2CPU2 and 3 share a 4G DRAM tile, so we must craft each L2CPU's device tree in a manner that they have no overlapping memory regions
 
-We need to make changes to the memory cell, and anything else that uses this memory cell (reserved memory, pmem region, network driver)
+Use the `boot_all` make target. See the "Booting all 4 L2CPUs" section of the
+top-level `README.md`.
 
-`blackhole-p100-2.dts` allocates the first 2G of the memory region for this L2CPU (with appropriate changes to the pmem region)  
-`blackhole-p100-3.dts` allocates the last 2G of the memory region for this L2CPU (with appropriate changes to the pmem region)
+L2CPU0 and L2CPU1 each have a dedicated 4G DRAM tile, so they use the full 4G.
+L2CPU2 and L2CPU3 share a 4G DRAM tile, so each must be given a non-overlapping
+half of the memory.
 
-L2CPU 0 and 1 can use the `blackhole-p100.dts` device tree from the linux kernel tree
+`boot_all` handles this without separate device trees: it boots all four from
+the same `blackhole-card.dtb` and `boot.py` patches the `memory@` node per
+L2CPU at runtime via `--mem_start`/`--mem_size` (L2CPU2 gets the first 2G,
+L2CPU3 the upper 2G). The reserved-memory and virtio regions are derived from
+that patched memory region, so they follow automatically.
 
-To boot all 4 L2CPUs, use the `boot_all` make target
+### Legacy: static per-L2CPU device trees
 
-All 4 L2CPUs can boot the same kernel, rootfs, opensbi. We need to provide a different device tree to each and the locations to put these for each L2CPUs
-
-Note: if `blackhole-p100.dts` in the kernel tree changes, the 2 device trees in this folder need to be updated too
+`blackhole-p100-2.dts` and `blackhole-p100-3.dts` are the older approach, where
+each L2CPU's memory split was baked into a separate device tree (the first/last
+2G respectively, with matching reserved-memory and pmem regions). These are kept
+for reference only; `boot_all` no longer uses them. If you do use them, note
+that they must be kept in sync with `blackhole-p100.dts` in the kernel tree.

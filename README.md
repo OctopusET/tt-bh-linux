@@ -236,6 +236,31 @@ Halt and catch fire!
   a particular result. See [this](watch.expect) and
   [this](.github/workflows/build.yml#L154) for examples on how to do this
 
+### Booting all 4 L2CPUs (16 cores) at once
+
+`make boot` boots a single L2CPU (select it with `L2CPU=n`). To bring up all
+four L2CPUs as independent Linux instances in one shot:
+
+```bash
+make boot_all
+```
+
+This performs a single chip reset, loads OpenSBI/Linux/device-tree for every
+L2CPU, starts them, and opens a console for each in a tmux 2x2 grid. Reconnect
+to a running set later with `make connect_all`.
+
+- Each L2CPU gets its own writable rootfs copy `rootfs.l2cpu-N.ext4` (made from
+  `DISK_IMAGE` on first boot; kept across reboots to preserve state).
+- L2CPU0 and L2CPU1 each have a dedicated 4GB DRAM tile. L2CPU2 and L2CPU3
+  share one tile, so each is given a non-overlapping 2GB half. `boot.py` patches
+  the device tree's memory region per L2CPU (`--mem_start`/`--mem_size`), so the
+  same `blackhole-card.dtb` is used for all four — no separate device trees.
+- Each L2CPU forwards SSH on its own host port, `2222 + 4*TTDEVICE + L2CPU`
+  (device 0: L2CPU0→2222, L2CPU1→2223, L2CPU2→2224, L2CPU3→2225). SSH into a
+  specific one with e.g. `make ssh L2CPU=2`.
+- The chip reset is chip-wide, so boot all the L2CPUs you want together; you
+  can't add one without resetting the others.
+
 ### Bring Your Own Image
 
 `KERNEL`, `OPENSBI`, `DTB`, `DISK_IMAGE` are Make variables; override one
