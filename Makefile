@@ -126,9 +126,10 @@ boot_initramfs: _need_linux _need_opensbi _need_dtb _need_rootfs _need_hosttool 
 connect: _need_hosttool _need_ttkmd
 	./console/tt-bh-linux --ttdevice $(TTDEVICE) --l2cpu $(L2CPU) --disk $(DISK_IMAGE)
 
-# Connect over SSH (requires a booted RISC-V)
+# Connect over SSH (requires a booted RISC-V). Each L2CPU forwards SSH on its own
+# host port (2222 + 4*ttdevice + l2cpu), matching console/network.hpp.
 ssh:
-	ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o NoHostAuthenticationForLocalhost=yes -o User=debian -p2222 localhost
+	ssh -F /dev/null -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o NoHostAuthenticationForLocalhost=yes -o User=debian -p$$((2222 + 4 * $(TTDEVICE) + $(L2CPU))) localhost
 
 # SESSION = connect_all
 # # Launch tmux with a 2x2 grid and connect to each l2cpu in each
