@@ -17,7 +17,9 @@ class VirtioDevice {
 protected:
     int ttdevice;
     int l2cpu_idx;
-    L2CPU l2cpu;
+    // Shared with the other device/console threads for this L2CPU so we only map
+    // its guest memory (two 4GB TLB windows) once per process instead of per thread.
+    L2CPU& l2cpu;
     // Starting address of L2CPU's DRAM
     uint64_t starting_address;
 
@@ -93,10 +95,10 @@ protected:
 
 
 public:
-    VirtioDevice(int ttdevice_, int l2cpu_idx_, std::atomic<bool>& exit_flag, std::mutex& lock, int interrupt_number_, uint64_t mmio_region_offset_)
+    VirtioDevice(int ttdevice_, int l2cpu_idx_, L2CPU& l2cpu_, std::atomic<bool>& exit_flag, std::mutex& lock, int interrupt_number_, uint64_t mmio_region_offset_)
         : ttdevice(ttdevice_),
           l2cpu_idx(l2cpu_idx_),
-          l2cpu(l2cpu_idx_, ttdevice_),
+          l2cpu(l2cpu_),
           mmio_region_offset(mmio_region_offset_),
           interrupt_number(interrupt_number_),
           interrupt_register_lock(lock),
